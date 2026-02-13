@@ -1,0 +1,19 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path="README.md" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Aspire.Hosting.Azure.Functions/Aspire.Hosting.Azure.Functions.csproj" />
+    <Project Path="src/Hmp.Devops.Tools.EnvironmentRemover/Hmp.Devops.Tools.EnvironmentRemover.csproj" />
+  </Folder>
+  <Folder Name="/aspire/">
+    <Project Path="aspire/AppHost/Hmp.Devops.Tools.AppHost.AppHost.csproj" />
+    <Project Path="aspire/ServiceDefaults/Hmp.Devops.Tools.AppHost.ServiceDefaults.csproj" />
+  </Folder>
+  <Folder Name="/docs/">
+    <File Path="docs/EnvironmentRemover.md" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="test/Hmp.Devops.Tools.EnvironmentRemover.Tests/Hmp.Devops.Tools.EnvironmentRemover.Tests.csproj" />
+  </Folder>
+</Solution>

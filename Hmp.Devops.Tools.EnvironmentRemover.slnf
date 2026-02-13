@@ -1,0 +1,9 @@
+{
+  "solution": {
+    "path": "Hmp.Devops.Tools.slnx",
+    "projects": [
+      "src\\Hmp.Devops.Tools.EnvironmentRemover\\Hmp.Devops.Tools.EnvironmentRemover.csproj",
+      "tests\\Hmp.Devops.Tools.EnvironmentRemover.Tests\\Hmp.Devops.Tools.EnvironmentRemover.Tests.csproj"
+    ]
+  }
+}

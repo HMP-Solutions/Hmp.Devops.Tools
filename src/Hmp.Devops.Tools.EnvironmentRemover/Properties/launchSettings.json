@@ -1,0 +1,9 @@
+{
+  "profiles": {
+    "Hmp_Devops_Tools": {
+      "commandName": "Project",
+      "commandLineArgs": "--port 7141",
+      "launchBrowser": false
+    }
+  }
+}
