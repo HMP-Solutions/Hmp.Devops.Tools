@@ -8,14 +8,14 @@ using Hmp.Devops.Tools.EnvironmentRemover.Interfaces;
 
 namespace Hmp.Devops.Tools.EnvironmentRemover
 {
-    public class AzureDevOpsWebhook
+    public class AzureDevOpsQueue
     {
-        private readonly ILogger<AzureDevOpsWebhook> _logger;
+        private readonly ILogger<AzureDevOpsQueue> _logger;
         private readonly IPullRequestPayloadParser _parser;
         private readonly IResourceGroupManager _resourceGroupManager;
 
-        public AzureDevOpsWebhook(
-            ILogger<AzureDevOpsWebhook> logger,
+        public AzureDevOpsQueue(
+            ILogger<AzureDevOpsQueue> logger,
             IPullRequestPayloadParser parser,
             IResourceGroupManager resourceGroupManager)
         {
