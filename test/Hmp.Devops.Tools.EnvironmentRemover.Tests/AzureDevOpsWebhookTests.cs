@@ -11,301 +11,27 @@ using Hmp.Devops.Tools.EnvironmentRemover.Interfaces;
 
 namespace Hmp.Devops.Tools.EnvironmentRemover.Tests
 {
-    public class AzureDevOpsWebhookTests
+    public class AzureDevOpsQueueTests
     {
-        private readonly Mock<ILogger<AzureDevOpsWebhook>> _mockLogger;
+        private readonly Mock<ILogger<AzureDevOpsQueue>> _mockLogger;
         private readonly Mock<IPullRequestPayloadParser> _mockParser;
         private readonly Mock<IResourceGroupManager> _mockResourceGroupManager;
-        private readonly AzureDevOpsWebhook _webhook;
+        private readonly AzureDevOpsQueue _queue;
 
-        public AzureDevOpsWebhookTests()
+        public AzureDevOpsQueueTests()
         {
-            _mockLogger = new Mock<ILogger<AzureDevOpsWebhook>>();
+            _mockLogger = new Mock<ILogger<AzureDevOpsQueue>>();
             _mockParser = new Mock<IPullRequestPayloadParser>();
             _mockResourceGroupManager = new Mock<IResourceGroupManager>();
-            _webhook = new AzureDevOpsWebhook(_mockLogger.Object, _mockParser.Object, _mockResourceGroupManager.Object);
+            _queue = new AzureDevOpsQueue(_mockLogger.Object, _mockParser.Object, _mockResourceGroupManager.Object);
         }
-
-        #region Webhook Function Tests
-
-        [Fact]
-        public async Task Webhook_WithEmptyBody_ReturnsBadRequest()
-        {
-            // Arrange
-            var httpRequest = CreateHttpRequest("");
-
-            // Act
-            var result = await _webhook.Webhook(httpRequest);
-
-            // Assert
-            var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
-            Assert.Equal("Empty request body", ((dynamic)badRequestResult.Value));
-        }
-
-        [Fact]
-        public async Task Webhook_WithInvalidJson_ReturnsBadRequest()
-        {
-            // Arrange
-            var httpRequest = CreateHttpRequest("{ invalid json }");
-            _mockParser
-                .Setup(p => p.ParseAsync(It.IsAny<string>()))
-                .ThrowsAsync(new System.Text.Json.JsonException("Invalid JSON"));
-
-            // Act
-            var result = await _webhook.Webhook(httpRequest);
-
-            // Assert
-            var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
-            var error = ((dynamic)badRequestResult.Value)?.error;
-            Assert.NotNull(error);
-        }
-
-        [Fact]
-        public async Task Webhook_WithUnsupportedEventType_ReturnsBadRequest()
-        {
-            // Arrange
-            var payload = @"{
-                ""eventType"": ""git.push"",
-                ""resource"": {}
-            }";
-            var httpRequest = CreateHttpRequest(payload);
-            _mockParser
-                .Setup(p => p.ParseAsync(payload))
-                .ReturnsAsync(Result<PullRequestInfo>.Failure("Event type not handled: git.push"));
-
-            // Act
-            var result = await _webhook.Webhook(httpRequest);
-
-            // Assert
-            var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
-            Assert.NotNull(((dynamic)badRequestResult.Value)?.error);
-        }
-
-        [Fact]
-        public async Task Webhook_WithNonClosingPullRequest_ReturnsOk()
-        {
-            // Arrange
-            var payload = @"{
-                ""eventType"": ""git.pullrequest.updated"",
-                ""resource"": {
-                    ""pullRequestId"": ""123"",
-                    ""status"": ""active"",
-                    ""repository"": { ""name"": ""TestRepo"" },
-                    ""closedBy"": { ""displayName"": ""John Doe"" },
-                    ""sourceRefName"": ""refs/heads/feature"",
-                    ""targetRefName"": ""refs/heads/main""
-                }
-            }";
-            var httpRequest = CreateHttpRequest(payload);
-            var prInfo = new PullRequestInfo("TestRepo", "123", "active", "John Doe", "refs/heads/feature", "refs/heads/main");
-            _mockParser
-                .Setup(p => p.ParseAsync(payload))
-                .ReturnsAsync(Result<PullRequestInfo>.Success(prInfo));
-
-            // Act
-            var result = await _webhook.Webhook(httpRequest);
-
-            // Assert
-            var okResult = Assert.IsType<OkObjectResult>(result);
-            var response = (dynamic)okResult.Value;
-            Assert.Equal("Not a closing event", response.message);
-        }
-
-        [Theory]
-        [InlineData("completed")]
-        [InlineData("abandoned")]
-        public async Task Webhook_WithClosingPullRequest_DeletesResourceGroup(string status)
-        {
-            // Arrange
-            var payload = @"{
-                ""eventType"": ""git.pullrequest.updated"",
-                ""resource"": {
-                    ""pullRequestId"": ""123"",
-                    ""status"": """ + status + @""",
-                    ""repository"": { ""name"": ""TestRepo"" },
-                    ""closedBy"": { ""displayName"": ""John Doe"" },
-                    ""sourceRefName"": ""refs/heads/feature"",
-                    ""targetRefName"": ""refs/heads/main""
-                }
-            }";
-            var httpRequest = CreateHttpRequest(payload);
-            var prInfo = new PullRequestInfo("TestRepo", "123", status, "John Doe", "refs/heads/feature", "refs/heads/main");
-            
-            _mockParser
-                .Setup(p => p.ParseAsync(payload))
-                .ReturnsAsync(Result<PullRequestInfo>.Success(prInfo));
-            
-            _mockResourceGroupManager
-                .Setup(m => m.DeleteResourceGroupAsync("TestRepo", "123"))
-                .ReturnsAsync(Result<bool>.Success(true));
-
-            // Act
-            var result = await _webhook.Webhook(httpRequest);
-
-            // Assert
-            var okResult = Assert.IsType<OkObjectResult>(result);
-            var response = (dynamic)okResult.Value;
-            Assert.Equal("Pull request closed event processed successfully", response.message);
-            Assert.Equal("123", response.pullRequestId);
-            
-            // Verify that DeleteResourceGroupAsync was called
-            _mockResourceGroupManager.Verify(m => m.DeleteResourceGroupAsync("TestRepo", "123"), Times.Once);
-        }
-
-        [Fact]
-        public async Task Webhook_WithClosingPullRequest_WhenResourceGroupDeletionFails_ReturnsBadRequest()
-        {
-            // Arrange
-            var payload = @"{
-                ""eventType"": ""git.pullrequest.updated"",
-                ""resource"": {
-                    ""pullRequestId"": ""789"",
-                    ""status"": ""completed"",
-                    ""repository"": { ""name"": ""TestRepo"" },
-                    ""closedBy"": { ""displayName"": ""John Doe"" },
-                    ""sourceRefName"": ""refs/heads/feature"",
-                    ""targetRefName"": ""refs/heads/main""
-                }
-            }";
-            var httpRequest = CreateHttpRequest(payload);
-            var prInfo = new PullRequestInfo("TestRepo", "789", "completed", "John Doe", "refs/heads/feature", "refs/heads/main");
-            
-            _mockParser
-                .Setup(p => p.ParseAsync(payload))
-                .ReturnsAsync(Result<PullRequestInfo>.Success(prInfo));
-            
-            _mockResourceGroupManager
-                .Setup(m => m.DeleteResourceGroupAsync("TestRepo", "789"))
-                .ReturnsAsync(Result<bool>.Failure("Azure API error"));
-
-            // Act
-            var result = await _webhook.Webhook(httpRequest);
-
-            // Assert
-            var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
-            var response = (dynamic)badRequestResult.Value;
-            Assert.Equal("Azure API error", response.error);
-        }
-
-        [Fact]
-        public async Task Webhook_WithClosingPullRequest_WhenResourceGroupDoesNotExist_ReturnsOkWithNothingDone()
-        {
-            // Arrange
-            var payload = @"{
-                ""eventType"": ""git.pullrequest.updated"",
-                ""resource"": {
-                    ""pullRequestId"": ""999"",
-                    ""status"": ""abandoned"",
-                    ""repository"": { ""name"": ""TestRepo"" },
-                    ""closedBy"": { ""displayName"": ""Jane Doe"" },
-                    ""sourceRefName"": ""refs/heads/feature"",
-                    ""targetRefName"": ""refs/heads/main""
-                }
-            }";
-            var httpRequest = CreateHttpRequest(payload);
-            var prInfo = new PullRequestInfo("TestRepo", "999", "abandoned", "Jane Doe", "refs/heads/feature", "refs/heads/main");
-            
-            _mockParser
-                .Setup(p => p.ParseAsync(payload))
-                .ReturnsAsync(Result<PullRequestInfo>.Success(prInfo));
-            
-            _mockResourceGroupManager
-                .Setup(m => m.DeleteResourceGroupAsync("TestRepo", "999"))
-                .ReturnsAsync(Result<bool>.Success(false));
-
-            // Act
-            var result = await _webhook.Webhook(httpRequest);
-
-            // Assert
-            var okResult = Assert.IsType<OkObjectResult>(result);
-            var response = (dynamic)okResult.Value;
-            Assert.Equal("Nothing was done.", response.message);
-            Assert.Equal("999", response.pullRequestId);
-        }
-
-        [Fact]
-        public async Task Webhook_WithClosingPullRequest_WhenParserThrowsException_ReturnsBadRequest()
-        {
-            // Arrange
-            var httpRequest = CreateHttpRequest("some payload");
-            _mockParser
-                .Setup(p => p.ParseAsync(It.IsAny<string>()))
-                .ThrowsAsync(new System.Text.Json.JsonException("Unexpected error"));
-
-            // Act
-            var result = await _webhook.Webhook(httpRequest);
-
-            // Assert
-            var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
-            var error = ((dynamic)badRequestResult.Value)?.error;
-            Assert.Equal("Invalid JSON payload", error);
-        }
-
-        [Fact]
-        public async Task Webhook_WithClosingPullRequest_WhenUnexpectedException_ReturnsInternalServerError()
-        {
-            // Arrange
-            var httpRequest = CreateHttpRequest("some payload");
-            _mockParser
-                .Setup(p => p.ParseAsync(It.IsAny<string>()))
-                .ThrowsAsync(new InvalidOperationException("Unexpected error"));
-
-            // Act
-            var result = await _webhook.Webhook(httpRequest);
-
-            // Assert
-            var statusResult = Assert.IsType<StatusCodeResult>(result);
-            Assert.Equal(500, statusResult.StatusCode);
-        }
-
-        [Fact]
-        public async Task Webhook_WithClosingPullRequest_ValidatesResponseContent()
-        {
-            // Arrange
-            var payload = @"{
-                ""eventType"": ""git.pullrequest.updated"",
-                ""resource"": {
-                    ""pullRequestId"": ""555"",
-                    ""status"": ""completed"",
-                    ""repository"": { ""name"": ""MyRepo"" },
-                    ""closedBy"": { ""displayName"": ""Alice"" },
-                    ""sourceRefName"": ""refs/heads/feature-x"",
-                    ""targetRefName"": ""refs/heads/main""
-                }
-            }";
-            var httpRequest = CreateHttpRequest(payload);
-            var prInfo = new PullRequestInfo("MyRepo", "555", "completed", "Alice", "refs/heads/feature-x", "refs/heads/main");
-            
-            _mockParser
-                .Setup(p => p.ParseAsync(payload))
-                .ReturnsAsync(Result<PullRequestInfo>.Success(prInfo));
-            
-            _mockResourceGroupManager
-                .Setup(m => m.DeleteResourceGroupAsync("MyRepo", "555"))
-                .ReturnsAsync(Result<bool>.Success(true));
-
-            // Act
-            var result = await _webhook.Webhook(httpRequest);
-
-            // Assert
-            var okResult = Assert.IsType<OkObjectResult>(result);
-            var response = (dynamic)okResult.Value;
-            Assert.Equal("Pull request closed event processed successfully", response.message);
-            Assert.Equal("555", response.pullRequestId);
-            Assert.Equal("completed", response.status);
-            Assert.Equal("MyRepo", response.repository);
-        }
-
-        #endregion
-
-        #region Queue Function Tests
 
         [Fact]
         public async Task Queue_WithEmptyMessage_ReturnsBadRequest()
         {
             // Arrange
             // Act
-            var result = await _webhook.Queue("");
+            var result = await _queue.Queue("");
 
             // Assert
             var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
@@ -321,7 +47,7 @@ namespace Hmp.Devops.Tools.EnvironmentRemover.Tests
                 .ThrowsAsync(new System.Text.Json.JsonException("Invalid JSON"));
 
             // Act
-            var result = await _webhook.Queue("{ invalid json }");
+            var result = await _queue.Queue("{ invalid json }");
 
             // Assert
             var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
@@ -349,7 +75,7 @@ namespace Hmp.Devops.Tools.EnvironmentRemover.Tests
                 .ReturnsAsync(Result<PullRequestInfo>.Success(prInfo));
 
             // Act
-            var result = await _webhook.Queue(payload);
+            var result = await _queue.Queue(payload);
 
             // Assert
             var okResult = Assert.IsType<OkObjectResult>(result);
@@ -385,7 +111,7 @@ namespace Hmp.Devops.Tools.EnvironmentRemover.Tests
                 .ReturnsAsync(Result<bool>.Success(true));
 
             // Act
-            var result = await _webhook.Queue(payload);
+            var result = await _queue.Queue(payload);
 
             // Assert
             var okResult = Assert.IsType<OkObjectResult>(result);
@@ -423,7 +149,7 @@ namespace Hmp.Devops.Tools.EnvironmentRemover.Tests
                 .ReturnsAsync(Result<bool>.Failure("Resource group deletion failed"));
 
             // Act
-            var result = await _webhook.Queue(payload);
+            var result = await _queue.Queue(payload);
 
             // Assert
             var badRequestResult = Assert.IsType<BadRequestObjectResult>(result);
@@ -457,7 +183,7 @@ namespace Hmp.Devops.Tools.EnvironmentRemover.Tests
                 .ReturnsAsync(Result<bool>.Success(false));
 
             // Act
-            var result = await _webhook.Queue(payload);
+            var result = await _queue.Queue(payload);
 
             // Assert
             var okResult = Assert.IsType<OkObjectResult>(result);
@@ -475,14 +201,12 @@ namespace Hmp.Devops.Tools.EnvironmentRemover.Tests
                 .ThrowsAsync(new InvalidOperationException("Unexpected error"));
 
             // Act
-            var result = await _webhook.Queue("some payload");
+            var result = await _queue.Queue("some payload");
 
             // Assert
             var statusResult = Assert.IsType<StatusCodeResult>(result);
             Assert.Equal(500, statusResult.StatusCode);
         }
-
-        #endregion
 
         #region Helper Methods
 
